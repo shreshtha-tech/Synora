@@ -1,0 +1,23 @@
+# Root .gitignore for Synora
+
+# Dependencies
+node_modules/
+myenv/
+venv/
+.env*
+!.env.example
+
+# Python
+__pycache__/
+*.pyc
+
+# Next.js
+.next/
+out/
+
+# IDE / Misc
+.vscode/
+.idea/
+.DS_Store
+*.log
+.vscode/
