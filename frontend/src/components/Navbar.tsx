@@ -27,7 +27,7 @@ export default function Navbar() {
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2 group">
             <div className="w-8 h-8 rounded-lg bg-[#e0e5ec] neo-shadow flex items-center justify-center text-primary font-bold text-lg group-hover:scale-105 transition-transform">
-              C
+              S
             </div>
             <span className="text-lg font-bold text-gray-800 tracking-tight group-hover:text-primary transition-colors">Synora</span>
           </Link>

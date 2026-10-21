@@ -9,7 +9,7 @@ export default function Footer() {
           <div className="col-span-1 md:col-span-1">
             <Link href="/" className="flex items-center gap-2 mb-4">
               <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-white font-bold text-xl">
-                C
+                S
               </div>
               <span className="text-xl font-bold text-gray-800 tracking-tight">Synora</span>
             </Link>
