@@ -5,6 +5,7 @@ from itertools import islice
 from types import SimpleNamespace
 
 from pinecone import Pinecone
+from pinecone.errors import NotFoundError
 import google.generativeai as genai
 
 from app.core.config import get_settings
@@ -153,4 +154,11 @@ async def delete_vectors(document_id: str):
     if layout['mode'] == 'vectors':
         await offload(lambda: _index().delete(filter={'document_id': document_id}))
     else:
-        await offload(lambda: _index().documents.delete(namespace=document_id, delete_all=True, timeout=60))
+        try:
+            await offload(lambda: _index().documents.delete(namespace=document_id, delete_all=True, timeout=60))
+        except NotFoundError as error:
+            # Failed uploads may never create a namespace. There is then no
+            # search data left to remove; continue file/database cleanup.
+            # Other missing resources (e.g. the index itself) remain errors.
+            if error.message.strip().rstrip('.').casefold() != 'namespace not found':
+                raise

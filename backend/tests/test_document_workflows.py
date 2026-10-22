@@ -146,5 +146,38 @@ class CompletionTests(unittest.IsolatedAsyncioTestCase):
         transaction.document.delete.assert_awaited_once_with(where={'id':'owned-doc'})
 
 
+class DeleteMissingNamespaceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_missing_namespace_still_deletes_file_and_database_rows(self):
+        from unittest.mock import MagicMock
+        from pinecone.errors import NotFoundError
+        from app.services.uploadthing_storage import ut_service
+        document = SimpleNamespace(userId='user', status='failed', fileUrl='https://storage.invalid/f/failed-key')
+        transaction = SimpleNamespace(
+            message=Mock(delete_many=AsyncMock()), documentdata=Mock(delete_many=AsyncMock()),
+            vectormetadata=Mock(delete_many=AsyncMock()), document=Mock(delete=AsyncMock()),
+        )
+        context = MagicMock()
+        context.__aenter__ = AsyncMock(return_value=transaction)
+        context.__aexit__ = AsyncMock(return_value=False)
+        db = Mock(document=Mock(find_unique=AsyncMock(return_value=document), update_many=AsyncMock(return_value=1)), tx=Mock(return_value=context))
+        redis = Mock(delete=AsyncMock())
+        index = Mock(documents=Mock(delete=Mock(side_effect=NotFoundError('Namespace not found'))))
+        with patch.object(documents, 'db', db), patch.object(documents, 'redis_client', redis), patch.object(vector_store, '_layout', return_value={'mode':'integrated'}), patch.object(vector_store, '_index', return_value=index), patch.object(ut_service, 'delete_file', AsyncMock()) as remove_file:
+            result = await documents.delete_document('failed-doc', {'sub':'user'})
+        self.assertEqual(result['message'], 'Document deleted successfully')
+        index.documents.delete.assert_called_once_with(namespace='failed-doc', delete_all=True, timeout=60)
+        remove_file.assert_awaited_once_with('failed-key')
+        transaction.document.delete.assert_awaited_once_with(where={'id':'failed-doc'})
+
+    async def test_other_provider_failures_are_not_ignored(self):
+        from pinecone.errors import NotFoundError, ApiError
+        for failure in (NotFoundError('Index not found'), ApiError('Service unavailable', status_code=503)):
+            index = Mock(documents=Mock(delete=Mock(side_effect=failure)))
+            with patch.object(vector_store, '_layout', return_value={'mode':'integrated'}), patch.object(vector_store, '_index', return_value=index):
+                with self.assertRaises(type(failure)) as raised:
+                    await vector_store.delete_vectors('doc')
+                self.assertIs(raised.exception, failure)
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -64,12 +64,11 @@ export default function Dashboard() {
       if (res.ok) {
         setDocuments((prev) => prev.filter((doc) => doc.id !== id));
       } else {
-        console.error("Failed to delete document");
-        alert("Failed to delete document");
+        const errorData = await res.json().catch(() => null);
+        alert(typeof errorData?.detail === "string" ? errorData.detail : "Failed to delete document. Please try again.");
       }
-    } catch (error) {
-      console.error("Error deleting document:", error);
-      alert("Error deleting document");
+    } catch {
+      alert("Unable to reach the delete service. Please try again.");
     }
   };
 
