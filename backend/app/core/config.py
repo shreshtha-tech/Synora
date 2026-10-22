@@ -1,4 +1,4 @@
-import os
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
@@ -15,6 +15,21 @@ class Settings(BaseSettings):
     UPLOADTHING_TOKEN: str
     REDIS_URL: str
     GOOGLE_CLIENT_ID: str
+    MAX_UPLOAD_MB: int = 100
+    DOCUMENT_CONCURRENCY: int = 2
+    LLM_CONCURRENCY: int = 4
+    EMBEDDING_CONCURRENCY: int = 2
+    EMBEDDING_BATCH_SIZE: int = Field(default=16, le=100)
+    ANALYSIS_CONTEXT_CHARS: int = Field(default=24000, ge=4000)
+
+    # Keep resource limits positive, including when supplied through .env.
+    @field_validator("MAX_UPLOAD_MB", "DOCUMENT_CONCURRENCY", "LLM_CONCURRENCY",
+                     "EMBEDDING_CONCURRENCY", "EMBEDDING_BATCH_SIZE", "ANALYSIS_CONTEXT_CHARS")
+    @classmethod
+    def positive_limit(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("Resource limits must be positive")
+        return value
 
 @lru_cache()
 def get_settings():

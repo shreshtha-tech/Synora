@@ -3,7 +3,7 @@ uvicorn[standard]
 python-multipart
 prisma
 google-generativeai
-pinecone
+pinecone>=10.1,<11
 redis
 google-auth
 requests

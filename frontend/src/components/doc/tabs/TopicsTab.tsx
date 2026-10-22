@@ -1,14 +1,17 @@
 import { Loader2 } from "lucide-react";
 
 import { renderText } from "@/lib/renderText";
+import TabLoadingPlaceholder from "@/components/doc/TabLoadingPlaceholder";
 
 interface TopicsTabProps {
   topics: string[];
   explanations: Record<string, string>;
   hasExplanations: boolean;
+  isProcessing: boolean;
+  progress: number;
 }
 
-export default function TopicsTab({ topics, explanations, hasExplanations }: TopicsTabProps) {
+export default function TopicsTab({ topics, explanations, hasExplanations, isProcessing, progress }: TopicsTabProps) {
   return (
     <div className="space-y-6 animate-in fade-in slide-in-from-right-4">
       <h2 className="text-2xl font-bold text-gray-800 mb-4">Key Topics</h2>
@@ -28,8 +31,10 @@ export default function TopicsTab({ topics, explanations, hasExplanations }: Top
             )}
           </div>
         ))
+      ) : isProcessing ? (
+        <TabLoadingPlaceholder label="Extracting topics and notes..." progress={progress} />
       ) : (
-        <p className="text-gray-500">No topics found.</p>
+        <p className="text-gray-500">Topics have not been generated. Use Retry processing above.</p>
       )}
     </div>
   );

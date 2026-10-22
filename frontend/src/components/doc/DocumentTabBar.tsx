@@ -58,8 +58,9 @@ export default function DocumentTabBar({ activeTab, onTabChange, isProcessing, d
 
       <button
         onClick={onDelete}
-        disabled={deleting}
-        className="px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-bold text-red-500 hover:bg-red-50 hover:neo-inset transition-all"
+        disabled={deleting || isProcessing}
+        title={isProcessing ? "Wait for processing to finish before deleting" : "Delete document"}
+        className="px-4 py-2 rounded-xl flex items-center gap-2 text-sm font-bold text-red-500 hover:bg-red-50 hover:neo-inset transition-all disabled:opacity-50 disabled:cursor-not-allowed"
       >
         <Trash2 className="w-4 h-4" />
         {deleting ? "Deleting..." : "Delete"}

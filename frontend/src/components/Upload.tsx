@@ -8,7 +8,7 @@ import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
 export default function Upload() {
-  const { data: session } = useSession();
+  const { data: session, status: sessionStatus } = useSession();
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -21,21 +21,24 @@ export default function Upload() {
   };
 
   const handleUpload = async () => {
+    if (sessionStatus === "loading") return;
     if (!session) {
-      signIn("google");
+      await signIn("google");
       return;
     }
     if (!file) return;
+
+    const token = session.backendToken;
+    if (!token) {
+      setStatus("Please sign in again to start a document session.");
+      await signIn("google");
+      return;
+    }
 
     setUploading(true);
     setStatus("Uploading...");
 
     try {
-      // For Google OAuth, we might use the ID token or just rely on session if backend verifies it differently.
-      // Assuming we pass the ID token.
-      // Use backend token
-      const token = (session as any).backendToken;
-
       const formData = new FormData();
       formData.append("file", file);
 
@@ -48,17 +51,26 @@ export default function Upload() {
       });
 
       if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.detail);
+        if (res.status === 401 || res.status === 403) {
+          setStatus("Your session expired. Please sign in again.");
+          await signIn("google");
+          return;
+        }
+        const errorData = await res.json().catch(() => null);
+        setStatus(
+          typeof errorData?.detail === "string"
+            ? errorData.detail
+            : `Upload failed (${res.status}). Please try again.`
+        );
+        return;
       }
 
       const data = await res.json();
       console.log("Upload success:", data);
       setStatus("Processing started! Redirecting...");
       router.push(`/doc/${data.id}`);
-    } catch (error) {
-      console.error(error);
-      setStatus("Upload failed. Please try again.");
+    } catch {
+      setStatus("Unable to reach the upload service. Please try again.");
     } finally {
       setUploading(false);
     }
@@ -87,7 +99,7 @@ export default function Upload() {
         >
           <button
             onClick={handleUpload}
-            disabled={uploading}
+            disabled={uploading || sessionStatus === "loading"}
             className={cn(
               "neo-btn px-8 py-3 rounded-full font-bold text-primary flex items-center justify-center gap-2 mx-auto w-full",
               uploading && "opacity-70 cursor-not-allowed"
@@ -108,7 +120,7 @@ export default function Upload() {
         </motion.div>
       )}
 
-      {status && <p className="mt-4 text-sm text-gray-500">{status}</p>}
+      {status && <p role="status" className="mt-4 text-sm text-gray-500">{status}</p>}
     </div>
   );
 }

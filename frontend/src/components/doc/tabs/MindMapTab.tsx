@@ -1,9 +1,10 @@
 import MindMap from "@/components/MindMap";
 import TabLoadingPlaceholder from "@/components/doc/TabLoadingPlaceholder";
+import type { MindTree } from "@/components/doc/types";
 
 interface MindMapTabProps {
   hasMindTree: boolean;
-  mindTree: any;
+  mindTree: Partial<MindTree>;
   isProcessing: boolean;
   progress: number;
 }

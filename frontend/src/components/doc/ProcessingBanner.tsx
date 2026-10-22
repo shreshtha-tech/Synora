@@ -9,7 +9,7 @@ export default function ProcessingBanner({ progress }: ProcessingBannerProps) {
     <div className="bg-[var(--primary)]/10 border-b border-[var(--primary)]/20 px-6 py-2 flex items-center gap-3">
       <Loader2 className="w-4 h-4 text-[var(--primary)] animate-spin" />
       <span className="text-sm font-medium text-[var(--primary)]">
-        Generating explanations, mind map &amp; predicted questions in the background...
+        Processing your document: topics, notes, mind map, questions and search...
       </span>
       <div className="ml-auto w-32 h-1.5 bg-gray-200 rounded-full overflow-hidden">
         <div

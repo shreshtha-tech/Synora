@@ -1,108 +1,96 @@
 from app.db.prisma import db
 from app.services.uploadthing_storage import ut_service
-from app.services.llm import extract_topics, generate_explanations, generate_mind_tree, generate_predicted_questions
+from app.services.llm import (
+    analysis_context, extract_topics, generate_explanations,
+    generate_mind_tree, generate_predicted_questions,
+)
+from app.services.document_text import extract_to_file, text_chunks
+from app.services.parallel import together, offload
+from app.services.vector_store import upsert_vectors
+from app.core.config import get_settings
 from app.core.redis import redis_client
-import fitz  # PyMuPDF
 import asyncio
-import json
+from prisma import Json
+import logging
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from time import perf_counter
+
+logger = logging.getLogger("uvicorn.error.processing")
+_document_slots = asyncio.Semaphore(get_settings().DOCUMENT_CONCURRENCY)
 
 
-async def process_document(document_id: str, file_url: str, file_key: str):
+async def _timed(document_id, stage, operation):
+    started = perf_counter()
     try:
-        # Update status to processing
-        await db.document.update(
-            where={"id": document_id},
-            data={"status": "processing"}
-        )
+        return await operation
+    finally:
+        logger.info("document=%s stage=%s elapsed=%.2fs", document_id, stage, perf_counter() - started)
 
-        # ──────────────────────────────────────────────
-        # PHASE 1: Fast path — download, extract text, extract topics
-        # ──────────────────────────────────────────────
 
-        # Download file
-        await redis_client.set(f"progress:{document_id}", "10")
-        file_content = await ut_service.download_as_bytes(file_url)
-        
-        # Extract text from PDF
-        await redis_client.set(f"progress:{document_id}", "20")
-        text = ""
-        
-        # UploadThing URLs don't have extensions, try PyMuPDF directly since we enforce PDF/DOCX at upload
-        try:
-            doc = fitz.open(stream=file_content, filetype="pdf")
-            for page in doc:
-                text += page.get_text()
-        except Exception as e:
-            print(f"PyMuPDF failed to extract text: {e}")
+async def _analyze_document(document_id: str, text_path: str):
+    context = await _timed(document_id, "analysis_context", analysis_context(text_path))
+    await redis_client.set(f"progress:{document_id}", "30")
 
-        if not text:
-            raise Exception("Could not extract text from document (ensure it is a valid PDF containing text)")
-
-        # Extract topics first (priority task)
-        await redis_client.set(f"progress:{document_id}", "30")
-        topics = await extract_topics(text)
-
-        # Extract explanations immediately alongside topics
-        await redis_client.set(f"progress:{document_id}", "35")
-        explanations = await generate_explanations(text, topics)
-
-        # Save both topics and explanations so the frontend can fully render the TopicsTab
+    async def topics_and_explanations():
+        topics = await extract_topics(context)
+        explanations = await generate_explanations(context, topics)
         await _save_document_data(document_id, topics=topics, explanations=explanations)
+        await redis_client.set(f"progress:{document_id}", "60")
+        await db.document.update(where={"id": document_id}, data={"status": "topics_ready"})
 
-        # Mark topics as ready — frontend can now display them
-        await redis_client.set(f"progress:{document_id}", "40")
-        await db.document.update(
-            where={"id": document_id},
-            data={"status": "topics_ready"}
-        )
+    # Start independent analyses immediately rather than waiting for topics.
+    _, mind_tree, questions = await together(
+        topics_and_explanations(), generate_mind_tree(context), generate_predicted_questions(context),
+    )
+    await _update_document_data(document_id, mind_tree=mind_tree, questions=questions)
 
-        # ──────────────────────────────────────────────
-        # PHASE 2: Background — remaining analysis + embeddings (concurrent)
-        # ──────────────────────────────────────────────
 
-        # Run mind tree, questions, and embeddings concurrently in the background
-        mind_tree_task = generate_mind_tree(text)
-        questions_task = generate_predicted_questions(text)
-
-        # Prepare embedding chunks while LLM tasks run
-        chunk_size = 1000
-        chunks = [text[i:i+chunk_size] for i in range(0, len(text), chunk_size)]
-
-        from app.services.vector_store import upsert_vectors
-        embeddings_task = upsert_vectors(document_id, chunks)
-
-        # Await all concurrently
-        mind_tree, questions, _ = await asyncio.gather(
-            mind_tree_task,
-            questions_task,
-            embeddings_task,
-        )
-
-        await redis_client.set(f"progress:{document_id}", "90")
-
-        # Update the document data row with remaining fields
-        await _update_document_data(
-            document_id,
-            mind_tree=mind_tree,
-            questions=questions,
-        )
-
-        # Mark fully ready
-        await redis_client.set(f"progress:{document_id}", "100")
-        await db.document.update(
-            where={"id": document_id},
-            data={"status": "ready"}
-        )
-
-        # Invalidate cached partial data so the next fetch gets the full result
-        await redis_client.delete(f"document_details:{document_id}")
-
-    except Exception as e:
-        print(f"Processing failed for {document_id}: {e}")
-        await db.document.update(
-            where={"id": document_id},
-            data={"status": "failed"}
-        )
+async def process_document(
+    document_id: str, file_url: str, file_key: str,
+    content_type: str = "application/pdf", local_path: str = None,
+):
+    started = perf_counter()
+    try:
+        # Bound concurrent documents so large uploads cannot exhaust memory/API quota.
+        async with _document_slots:
+            await db.document.update(where={"id": document_id}, data={"status": "processing"})
+            await redis_client.delete(f"document_details:v2:{document_id}")
+            await redis_client.delete(f"processing_error:{document_id}")
+            with TemporaryDirectory(prefix="synora-process-") as directory:
+                source = local_path or str(Path(directory) / "source")
+                await redis_client.set(f"progress:{document_id}", "10")
+                if not local_path:
+                    await ut_service.download_to_file(file_url, source)
+                text_path = str(Path(directory) / "text.txt")
+                characters = await _timed(document_id, "extract", offload(
+                    extract_to_file, source, text_path, content_type,
+                ))
+                logger.info("document=%s extracted_characters=%s", document_id, characters)
+                await redis_client.set(f"progress:{document_id}", "20")
+                # Index original text while preparing all document-wide analyses.
+                results = await asyncio.gather(
+                    _timed(document_id, "analysis", _analyze_document(document_id, text_path)),
+                    _timed(document_id, "embeddings", upsert_vectors(document_id, text_chunks(text_path))),
+                    return_exceptions=True,
+                )
+                # Preserve successful analysis if retrieval fails, and vice versa.
+                for result in results:
+                    if isinstance(result, BaseException):
+                        raise result
+            await redis_client.set(f"progress:{document_id}", "100")
+            await db.document.update(where={"id": document_id}, data={"status": "ready"})
+            await redis_client.delete(f"document_details:{document_id}")
+            await redis_client.delete(f"document_details:v2:{document_id}")
+    except Exception as error:
+        logger.exception("Processing failed for document=%s", document_id)
+        message = str(error) if isinstance(error, ValueError) and str(error).startswith(("No readable text", "Empty", "Invalid AI", "Document summaries")) else "Document processing failed. Retry to regenerate the missing results."
+        await redis_client.set(f"processing_error:{document_id}", message, expire=604800)
+        await db.document.update(where={"id": document_id}, data={"status": "failed"})
+    finally:
+        if local_path:
+            Path(local_path).unlink(missing_ok=True)
+        logger.info("document=%s stage=total elapsed=%.2fs", document_id, perf_counter() - started)
 
 
 # ── DB helpers with retry logic ──────────────────────────────
@@ -117,14 +105,16 @@ async def _save_document_data(document_id: str, topics: list, explanations: dict
             if not db.is_connected():
                 await db.connect()
 
-            await db.documentdata.create(
-                data={
+            fields = {
+                "topics": Json(topics), "explanations": Json(explanations),
+                "mindTree": Json({}), "predictedQuestions": Json([]),
+            }
+            await db.documentdata.upsert(
+                where={"documentId": document_id},
+                data={"create": {
                     "documentId": document_id,
-                    "topics": json.dumps(topics),
-                    "explanations": json.dumps(explanations),
-                    "mindTree": json.dumps({}),
-                    "predictedQuestions": json.dumps([]),
-                }
+                    **fields,
+                }, "update": fields},
             )
             return
         except Exception as e:
@@ -145,8 +135,8 @@ async def _update_document_data(document_id: str, mind_tree: dict, questions: li
             await db.documentdata.update(
                 where={"documentId": document_id},
                 data={
-                    "mindTree": json.dumps(mind_tree),
-                    "predictedQuestions": json.dumps(questions),
+                    "mindTree": Json(mind_tree),
+                    "predictedQuestions": Json(questions),
                 }
             )
             return

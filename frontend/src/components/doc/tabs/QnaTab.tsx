@@ -4,73 +4,72 @@ import { useState, useEffect } from "react";
 import { MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { renderText } from "@/lib/renderText";
+import type { Session } from "next-auth";
+import type { ChatMessage } from "@/components/doc/types";
+import { apiRequest, errorMessage } from "@/lib/api";
 
 interface QnaTabProps {
   documentId: string;
-  session: any;
+  session: Session | null;
 }
 
 
 
 export default function QnaTab({ documentId, session }: QnaTabProps) {
   const [question, setQuestion] = useState("");
-  const [chatHistory, setChatHistory] = useState<{ role: "user" | "ai"; content: string }[]>([]);
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [asking, setAsking] = useState(false);
+  const [error, setError] = useState("");
+  const token = session?.backendToken;
 
   // Fetch existing chat history
   useEffect(() => {
-    if (!documentId || !session) return;
-
-    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/qna/history/${documentId}`, {
-      headers: { Authorization: `Bearer ${session.backendToken}` },
-    })
-      .then((res) => res.json())
+    if (!documentId || !token) return;
+    const controller = new AbortController();
+    apiRequest<ChatMessage[]>(`/api/v1/qna/history/${documentId}`, token, { signal: controller.signal })
       .then((data) => {
         if (Array.isArray(data)) setChatHistory(data);
       })
-      .catch((err) => console.error("Failed to fetch chat history", err));
-  }, [documentId, session]);
+      .catch((error) => { if (!controller.signal.aborted) setError(errorMessage(error)); });
+    return () => controller.abort();
+  }, [documentId, token]);
 
   const handleAskQuestion = async () => {
-    if (!question.trim() || asking) return;
+    if (!question.trim() || asking || !token) return;
 
     const userQuestion = question;
-    setQuestion("");
-    setChatHistory((prev) => [...prev, { role: "user", content: userQuestion }]);
+    setError("");
     setAsking(true);
 
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/qna/`, {
+      const data = await apiRequest<{ answer: string }>("/api/v1/qna/", token, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${session.backendToken}`,
         },
         body: JSON.stringify({ documentId, question: userQuestion }),
       });
 
-      if (!res.ok) throw new Error("Failed to get answer");
-
-      const data = await res.json();
-      setChatHistory((prev) => [...prev, { role: "ai", content: data.answer }]);
+      setQuestion("");
+      setChatHistory((prev) => [...prev, { role: "user", content: userQuestion }, { role: "ai", content: data.answer }]);
     } catch (error) {
-      console.error("Q&A failed:", error);
-      setChatHistory((prev) => [...prev, { role: "ai", content: "Sorry, I couldn't get an answer at this time." }]);
+      setError(errorMessage(error));
     } finally {
       setAsking(false);
     }
   };
 
   const handleClearChat = async () => {
+    if (asking) return;
     if (!confirm("Clear chat history?")) return;
     try {
-      await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/v1/qna/history/${documentId}`, {
+      await apiRequest(`/api/v1/qna/history/${documentId}`, token, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${session.backendToken}` },
       });
       setChatHistory([]);
+      setError("");
     } catch (error) {
-      console.error("Failed to clear chat", error);
+      setError(errorMessage(error));
     }
   };
 
@@ -81,6 +80,7 @@ export default function QnaTab({ documentId, session }: QnaTabProps) {
         {chatHistory.length > 0 && (
           <button
             onClick={handleClearChat}
+            disabled={asking}
             className="text-xs text-red-500 hover:text-red-600 font-medium px-3 py-1 rounded-lg hover:bg-red-50 transition-colors"
           >
             Clear Chat
@@ -88,7 +88,8 @@ export default function QnaTab({ documentId, session }: QnaTabProps) {
         )}
       </div>
 
-      <div className="flex-1 neo-inset rounded-2xl mb-4 p-4 overflow-y-auto">
+      {error && <p role="alert" className="mb-4 text-red-600">{error}</p>}
+      <div className="flex-1 min-h-0 neo-inset rounded-2xl mb-4 p-4 overflow-y-auto">
         {chatHistory.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-400">
             <MessageSquare className="w-12 h-12 mb-2 opacity-20" />
@@ -131,11 +132,11 @@ export default function QnaTab({ documentId, session }: QnaTabProps) {
           onKeyDown={(e) => e.key === "Enter" && handleAskQuestion()}
           placeholder="Type your question..."
           className="flex-1 neo-inset px-4 py-3 rounded-xl bg-transparent outline-none"
-          disabled={asking}
+          disabled={asking || !token}
         />
         <button
           onClick={handleAskQuestion}
-          disabled={asking || !question.trim()}
+          disabled={asking || !question.trim() || !token}
           className="neo-btn px-6 py-3 rounded-xl font-bold text-primary disabled:opacity-50"
         >
           {asking ? "..." : "Send"}

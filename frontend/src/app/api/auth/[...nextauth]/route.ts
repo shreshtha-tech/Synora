@@ -22,12 +22,12 @@ const handler = NextAuth({
     async session({ session, token }) {
       if (session.user) {
         // Pass the ID token or access token to the client for backend calls
-        (session as any).idToken = token.id_token;
-        (session as any).backendToken = token.backendToken;
+        session.idToken = token.id_token;
+        session.backendToken = token.backendToken;
         if (token.user) {
-             (session as any).user = { ...session.user, ...token.user };
+             session.user = { ...session.user, ...token.user };
         } else {
-             (session as any).user.id = token.sub;
+             session.user.id = token.sub;
         }
       }
       return session;
@@ -49,10 +49,11 @@ const handler = NextAuth({
             token.backendToken = data.token;
             token.user = data.user;
           } else {
-            console.error("Backend login failed", await res.text());
+            throw new Error(`Backend login failed (${res.status})`);
           }
         } catch (e) {
           console.error("Backend login error", e);
+          throw new Error("Unable to start your document session. Please try signing in again.");
         }
       }
       return token;

@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import time
 import urllib.parse
+import asyncio
 from sqids import Sqids
 from app.core.config import get_settings
 
@@ -123,12 +124,12 @@ class UploadThingService:
         self.api_url = "https://api.uploadthing.com"
         self.ingest_url = f"https://{self.regions[0]}.ingest.uploadthing.com"
 
-    async def upload_file(self, file_bytes: bytes, filename: str, content_type: str = "application/pdf") -> dict:
+    async def upload_file(self, file_bytes, filename: str, content_type: str = "application/pdf", file_size: int = None) -> dict:
         """
         Upload a file to UploadThing using the v7 ingest flow.
         Replicates the JS SDK's UTApi.uploadFiles logic exactly.
         """
-        file_size = len(file_bytes)
+        file_size = file_size if file_size is not None else len(file_bytes)
 
         # Step 1: Generate a key (same algorithm as JS SDK)
         file_key = _generate_key(filename, file_size, content_type, self.app_id)
@@ -169,6 +170,15 @@ class UploadThingService:
             "name": filename,
             "size": file_size,
         }
+
+    async def download_to_file(self, file_url: str, destination: str):
+        """Stream recovery downloads to disk instead of retaining the entire file."""
+        async with httpx.AsyncClient(timeout=120, follow_redirects=True) as client:
+            async with client.stream("GET", file_url) as response:
+                response.raise_for_status()
+                with open(destination, "wb") as output:
+                    async for chunk in response.aiter_bytes(1024 * 1024):
+                        await asyncio.to_thread(output.write, chunk)
 
     async def download_as_bytes(self, file_url: str) -> bytes:
         """Download a file from its UploadThing URL."""
