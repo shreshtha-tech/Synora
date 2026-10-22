@@ -1,0 +1,14 @@
+# Only backend runtime sources belong in the default backend image.
+**
+!Dockerfile
+!backend/
+!backend/requirements.txt
+!backend/main.py
+!backend/prisma/
+!backend/prisma/**
+!backend/app/
+!backend/app/**
+**/__pycache__/
+**/*.pyc
+**/.env
+**/.env.*

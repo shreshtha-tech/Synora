@@ -15,8 +15,13 @@ services:
   - type: web
     name: synora-backend
     runtime: docker
-    rootDir: backend
-    dockerfilePath: ./Dockerfile
+    # Paths are explicit from the repository root; COPY uses backend/ as context.
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    buildFilter:
+      paths:
+        - backend/**
+        - render.yaml
     plan: starter         # free tier (512MB) is likely too small for Prisma + PyMuPDF
     healthCheckPath: /health
     envVars:

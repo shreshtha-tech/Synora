@@ -34,12 +34,42 @@ The backend for Synora, an AI-powered document assistant. Built with FastAPI, it
 
 ## Docker
 
-Build and run the backend container:
+The repository-root Dockerfile supports hosting services that use the default
+`./Dockerfile` path. From the repository root, build it with:
 
 ```bash
 docker build -t synora-backend .
+```
+
+This builds the backend. The frontend is deployed separately.
+
+From the repository root (`Synora-main`), build and run the backend container:
+
+```bash
+docker build -f backend/Dockerfile -t synora-backend ./backend
 docker run -p 8000:8000 --env-file .env synora-backend
 ```
+
+### Render backend settings
+
+For an existing Render Docker service, open **Settings → Build & Deploy**:
+
+| Setting | Value |
+| --- | --- |
+| Root Directory | Leave empty (repository root) |
+| Dockerfile Path | `./backend/Dockerfile` |
+| Docker Build Context Directory | `./backend` |
+
+Alternatively, leave Root Directory empty and use `./Dockerfile` with build
+context `.` to use the repository-root backend Dockerfile. The two combinations
+are supported; keep each Dockerfile paired with its matching context.
+
+Save the settings and choose **Manual Deploy → Deploy latest commit**. A service
+created manually does not automatically take its settings from `render.yaml`;
+use a Render Blueprint to manage the service through that file.
+
+The Dockerfile inside `backend/` expects the backend folder as its build
+context. The root Dockerfile expects the repository root as its build context.
 
 ## API Documentation
 
