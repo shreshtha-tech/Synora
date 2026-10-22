@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { useRouter, useParams } from "next/navigation";
 import { useSession, signIn } from "next-auth/react";
-import { X } from "lucide-react";
 import LoadingScreen from "@/components/LoadingScreen";
 import DocumentTabBar from "@/components/doc/DocumentTabBar";
 import ProcessingBanner from "@/components/doc/ProcessingBanner";
@@ -17,14 +16,13 @@ import type { DocumentDetails } from "@/components/doc/types";
 import { apiRequest, errorMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
-export type TabId = "topics" | "qna" | "predicted" | "previous";
+export type TabId = "topics" | "mindmap" | "qna" | "predicted" | "previous";
 
 export default function DocumentPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { data: session, status: sessionStatus } = useSession();
   const [activeTab, setActiveTab] = useState<TabId>("topics");
-  const [showMindMap, setShowMindMap] = useState(false);
   const [data, setData] = useState<DocumentDetails | null>(null);
   const [loading, setLoading] = useState(true);
   const [deleting, setDeleting] = useState(false);
@@ -95,23 +93,20 @@ export default function DocumentPage() {
   const processingError = data.error || (data.status === "failed" ? "Document processing failed. Please retry." : "");
   return (
     <div className="flex flex-col h-[calc(100vh-64px)] overflow-hidden bg-[#e0e5ec]">
-      <DocumentTabBar activeTab={activeTab} onTabChange={setActiveTab} isProcessing={isProcessing} deleting={deleting} onDelete={handleDelete} onOpenMindMap={() => setShowMindMap(true)} />
+      <DocumentTabBar activeTab={activeTab} onTabChange={setActiveTab} isProcessing={isProcessing} deleting={deleting} onDelete={handleDelete} />
       {error && <div role="alert" className="px-6 py-3 bg-red-50 text-red-700 flex items-center justify-between gap-3"><span>{error}</span><button className="underline shrink-0" onClick={() => setRefresh(value => value + 1)}>Refresh</button></div>}
       {processingError && !isProcessing && <div role="alert" className="px-6 py-3 bg-amber-50 text-amber-900 flex items-center justify-between gap-3"><span>{processingError}</span><button disabled={retrying} onClick={handleRetry} className="neo-btn px-4 py-2 shrink-0 disabled:opacity-50">{retrying ? "Starting..." : "Retry processing"}</button></div>}
       {isProcessing && <ProcessingBanner progress={progress} />}
       <div className="flex flex-col lg:flex-row flex-1 min-h-0 overflow-hidden">
         {!isFullScreen && <PdfViewer fileUrl={data.fileUrl} fileType={data.fileType} />}
-        <div className={cn("p-6 lg:p-8 overflow-y-auto min-h-0 flex-1 bg-[#e0e5ec]", isFullScreen ? "w-full" : "w-full lg:w-1/2")}>
+        <div className={cn("p-6 lg:p-8 min-h-0 flex-1 bg-[#e0e5ec]", activeTab === "mindmap" ? "overflow-hidden" : "overflow-y-auto", isFullScreen ? "w-full" : "w-full lg:w-1/2")}>
           {activeTab === "topics" && <TopicsTab topics={data.topics} explanations={data.explanations} hasExplanations={Object.keys(data.explanations).length > 0} isProcessing={isProcessing} progress={progress} />}
+          {activeTab === "mindmap" && <MindMapTab hasMindTree={Boolean(data.mindTree.name)} mindTree={data.mindTree} isProcessing={isProcessing} progress={progress} />}
           {activeTab === "qna" && <QnaTab documentId={id} session={session} />}
           {activeTab === "predicted" && <PredictedTab hasPredictedQuestions={data.predictedQuestions.length > 0} predictedQuestions={data.predictedQuestions} isProcessing={isProcessing} progress={progress} />}
           {activeTab === "previous" && <PreviousTab documentId={id} token={token} />}
         </div>
       </div>
-      {showMindMap && <div className="fixed inset-0 z-[100] flex flex-col bg-[#1a1b1e]">
-        <div className="flex justify-between items-center px-6 py-4 border-b border-white/10"><div><h2 className="text-xl font-medium text-white">{data.name.replace(/\.[^/.]+$/, "")}</h2><p className="text-sm text-gray-400">Concept map from this document</p></div><button aria-label="Close mind map" onClick={() => setShowMindMap(false)} className="p-2 text-gray-300 hover:text-white"><X className="w-6 h-6" /></button></div>
-        <div className="flex-1 min-h-0"><MindMapTab hasMindTree={Boolean(data.mindTree.name)} mindTree={data.mindTree} isProcessing={isProcessing} progress={progress} /></div>
-      </div>}
     </div>
   );
 }
