@@ -2,8 +2,8 @@ import { Position, type Edge, type Node } from "@xyflow/react";
 
 export type Concept = { name: string; children: Concept[] };
 export type ConceptNode = Node<{ label: string }, "concept">;
-const WIDTH = 220;
-const GAP = 64;
+const WIDTH = 160;
+const GAP = 40;
 
 export function normalizeConcept(value: unknown, name = "Concept Map", depth = 0): Concept {
   if (depth > 64) return { name, children: [] };
@@ -25,36 +25,35 @@ export function normalizeConcept(value: unknown, name = "Concept Map", depth = 0
   };
 }
 
-export function verticalMindMap(tree: Concept): { nodes: ConceptNode[]; edges: Edge[] } {
-  const widths = new Map<string, number>();
-  const heights = new Map<string, number>();
-  const rowHeights: number[] = [];
-  function measure(concept: Concept, id: string, depth: number): number {
-    const lines = concept.name.split("\n").reduce((count, line) => count + Math.max(1, Math.ceil(line.length / 22)), 0);
-    const height = Math.max(64, 24 + lines * 20);
-    heights.set(id, height);
-    rowHeights[depth] = Math.max(rowHeights[depth] || 0, height);
-    const childrenWidth = concept.children.reduce((sum, child, index) => sum + measure(child, `${id}-${index}`, depth + 1), 0) + Math.max(0, concept.children.length - 1) * GAP;
-    const width = Math.max(WIDTH, childrenWidth);
-    widths.set(id, width);
-    return width;
+export function verticalMindMap(tree: Concept, availableWidth = 1400): { nodes: ConceptNode[]; edges: Edge[] } {
+  type Entry = { concept: Concept; id: string; parent?: string };
+  const levels: Entry[][] = [];
+  function collect(concept: Concept, id: string, depth: number, parent?: string) {
+    (levels[depth] ||= []).push({ concept, id, parent });
+    concept.children.forEach((child, index) => collect(child, `${id}-${index}`, depth + 1, id));
   }
-  measure(tree, "root", 0);
-  const rowY: number[] = [0];
-  for (let depth = 1; depth < rowHeights.length; depth++) rowY[depth] = rowY[depth - 1] + rowHeights[depth - 1] + 100;
+  collect(tree, "root", 0);
+  const columns = Math.max(1, Math.floor((availableWidth + GAP) / (WIDTH + GAP)));
   const nodes: ConceptNode[] = [];
   const edges: Edge[] = [];
-  function place(concept: Concept, id: string, left: number, depth: number, parent?: string) {
-    const width = widths.get(id)!;
-    nodes.push({ id, type: "concept", data: { label: concept.name }, position: { x: left + (width - WIDTH) / 2, y: rowY[depth] }, sourcePosition: Position.Bottom, targetPosition: Position.Top, style: { width: WIDTH, height: heights.get(id) } });
-    if (parent) edges.push({ id: `${parent}:${id}`, source: parent, target: id, type: "default", style: { stroke: "#8b92f2", strokeWidth: 1.2, strokeDasharray: "5 5" } });
-    let childLeft = left;
-    concept.children.forEach((child, index) => {
-      const childId = `${id}-${index}`;
-      place(child, childId, childLeft, depth + 1, id);
-      childLeft += widths.get(childId)! + GAP;
-    });
+  let y = 0;
+  for (const level of levels) {
+    // Lay each depth out independently. A large descendant branch must not
+    // stretch the root/category row across the width of all its leaves.
+    for (let offset = 0; offset < level.length; offset += columns) {
+      const row = level.slice(offset, offset + columns);
+      const heights = row.map(({ concept }) => {
+        const lines = concept.name.split("\n").reduce((count, line) => count + Math.max(1, Math.ceil(line.length / 20)), 0);
+        return Math.max(36, 20 + lines * 16);
+      });
+      const rowWidth = row.length * WIDTH + (row.length - 1) * GAP;
+      const startX = Math.max(0, (availableWidth - rowWidth) / 2);
+      row.forEach(({ concept, id, parent }, column) => {
+        nodes.push({ id, type: "concept", data: { label: concept.name }, position: { x: startX + column * (WIDTH + GAP), y }, sourcePosition: Position.Bottom, targetPosition: Position.Top, style: { width: WIDTH, height: heights[column] } });
+        if (parent) edges.push({ id: `${parent}:${id}`, source: parent, target: id, type: "default", style: { stroke: "#8b92f2", strokeWidth: 1, strokeDasharray: "5 5" } });
+      });
+      y += Math.max(...heights) + 72;
+    }
   }
-  place(tree, "root", 0, 0);
   return { nodes, edges };
 }
